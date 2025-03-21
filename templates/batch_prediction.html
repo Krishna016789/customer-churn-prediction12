@@ -1,0 +1,437 @@
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Batch Churn Prediction</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 250px;
+            height: 100%;
+            background: #343a40;
+            color: white;
+            padding: 20px;
+        }
+        .sidebar a { color: #fff; text-decoration: none; }
+        .sidebar a:hover { color: #00d4ff; }
+        .content { margin-left: 270px; padding: 20px; }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+            background: linear-gradient(145deg, #ffffff, #f0f0f0);
+            transition: transform 0.3s;
+            margin-bottom: 20px;
+        }
+        .card:hover { transform: translateY(-5px); }
+        .chart-container { max-width: 600px; margin: 20px auto; }
+        h2, h3 { color: #2c3e50; }
+        .gauge-container { display: flex; justify-content: space-around; flex-wrap: wrap; }
+        .fade-in {
+            animation: fadeIn 1s ease-in;
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h4>Churn Dashboard</h4>
+        <ul class="nav flex-column">
+            <li class="nav-item"><a href="{{ url_for('prediction') }}" class="nav-link"><i class="bi bi-person"></i> Single Prediction</a></li>
+            <li class="nav-item"><a href="{{ url_for('batch_prediction') }}" class="nav-link"><i class="bi bi-upload"></i> Batch Prediction</a></li>
+        </ul>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+        <h2 class="text-center mb-4 fade-in">Batch Churn Prediction</h2>
+        
+        <div class="card p-4 fade-in">
+            <form method="POST" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label class="form-label"><i class="bi bi-file-earmark-arrow-up"></i> Choose CSV File:</label>
+                    <input type="file" name="file" accept=".csv" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><i class="bi bi-gear"></i> Select Model:</label>
+                    <select name="model" class="form-select" required>
+                        <option value="XGBoost" {% if selected_model == "XGBoost" %}selected{% endif %}>XGBoost</option>
+                        <option value="Decision Tree" {% if selected_model == "Decision Tree" %}selected{% endif %}>Decision Tree</option>
+                        <option value="Random Forest" {% if selected_model == "Random Forest" %}selected{% endif %}>Random Forest</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-cloud-upload"></i> Upload and Predict</button>
+            </form>
+            {% if error %}
+                <p class="text-danger mt-3">{{ error }}</p>
+            {% endif %}
+        </div>
+        <!-- CHANGE 1: Added new Data Validation Report card here -->
+        {% if validation_report %}
+        <div class="card p-4 fade-in">
+            <h3><i class="bi bi-clipboard-data"></i> Data Validation Report</h3>
+            <p><strong>Total Rows:</strong> {{ validation_report.total_rows }}</p>
+            <p><strong>Total Columns:</strong> {{ validation_report.total_columns }}</p>
+            <h4>Missing Values:</h4>
+            <ul>
+                {% for col, count in validation_report.missing_values.items() %}
+                    <li>{{ col }}: {{ count }}</li>
+                {% endfor %}
+            </ul>
+            <h4>Data Types:</h4>
+            <ul>
+                {% for col, dtype in validation_report.data_types.items() %}
+                    <li>{{ col }}: {{ dtype }}</li>
+                {% endfor %}
+            </ul>
+            <h4>Summary Statistics:</h4>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Column</th>
+                        <th>Count</th>
+                        <th>Mean</th>
+                        <th>Std</th>
+                        <th>Min</th>
+                        <th>25%</th>
+                        <th>50%</th>
+                        <th>75%</th>
+                        <th>Max</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for col, stats in validation_report.summary_stats.items() %}
+                        <tr>
+                            <td>{{ col }}</td>
+                            <td>{{ stats['count']|round(0)|int }}</td>
+                            <td>{{ stats['mean']|round(2) }}</td>
+                            <td>{{ stats['std']|round(2) }}</td>
+                            <td>{{ stats['min']|round(2) }}</td>
+                            <td>{{ stats['25%']|round(2) }}</td>
+                            <td>{{ stats['50%']|round(2) }}</td>
+                            <td>{{ stats['75%']|round(2) }}</td>
+                            <td>{{ stats['max']|round(2) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        <!-- END CHANGE 1 -->
+
+        {% if results %}
+    <!-- Gauges -->
+    <div class="card p-4 fade-in">
+        <h3><i class="bi bi-speedometer2"></i> Key Metrics ({{ selected_model }})</h3>
+        <div class="gauge-container">
+            <div class="chart-container" style="max-width: 200px;">
+                <canvas id="gaugeChurnScore"></canvas>
+            </div>
+            <div class="chart-container" style="max-width: 200px;">
+                <canvas id="gaugeProbability"></canvas>
+            </div>
+            <div class="chart-container" style="max-width: 200px;">
+                <canvas id="gaugeChurnPercentage"></canvas>
+            </div>
+        </div>
+    </div>
+
+            <div class="card p-4 fade-in">
+                <h3><i class="bi bi-bar-chart"></i> Aggregate Results</h3>
+                <p><strong>Average Churn Score:</strong> {{ avg_churn_score|round(2) }}%</p>
+                <p><strong>Average Churn Probability:</strong> {{ avg_probability|round(2) }}%</p>
+                <p><strong>Churn Risk Percentage:</strong> {{ churn_percentage|round(2) }}% ({{ churn_percentage|round(0)|int }} out of {{ results|length }} customers)</p>
+            </div>
+
+            <div class="card p-4 fade-in">
+                <h3><i class="bi bi-table"></i> Individual Prediction Results</h3>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Customer Index</th>
+                            <th>Churn Score (%)</th>
+                            <th>Churn Probability (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for index, pred, prob in results %}
+                            <tr>
+                                <td>{{ index }}</td>
+                                <td>{{ pred|round(2) }}</td>
+                                <td>{{ prob|round(2) }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <!-- CHANGE 2: Updated Visualizations card with new charts -->
+            <div class="card p-4 fade-in">
+                <h3><i class="bi bi-pie-chart"></i> Visualizations</h3>
+                <div class="chart-container">
+                    <canvas id="churnBarChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="churnPieChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="riskBarChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="scoreDistChart"></canvas>
+                </div>
+                <!-- Added new histogram chart -->
+                <div class="chart-container">
+                    <canvas id="probHistogramChart"></canvas>
+                </div>
+                <!-- Added new box plot chart -->
+                <div class="chart-container">
+                    <canvas id="scoreBoxplotChart"></canvas>
+                </div>
+            </div>
+            <!-- END CHANGE 2 -->
+
+            
+
+            <div class="card p-4 fade-in">
+                <h3><i class="bi bi-lightbulb"></i> Insights</h3>
+                <ul>
+                    {% for insight, data in insights %}
+                        <li>{{ insight }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="chart-container">
+                    <canvas id="insightChurnPie"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="insightRiskBar"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="insightScoreBar"></canvas>
+                </div>
+            </div>
+
+            <div class="card p-4 fade-in">
+                <h3><i class="bi bi-gear"></i> Business Recommendations</h3>
+                <ul>
+                    {% for rec, data in recommendations %}
+                        <li>{{ rec }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="chart-container">
+                    <canvas id="recHighRiskPie"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="recChurnBar"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="recLowRiskDoughnut"></canvas>
+                </div>
+            </div>
+           
+            <script>
+                const chartData = JSON.parse('{{ chart_data|safe }}');
+                console.log("Chart Data:", chartData);
+
+                // Gauge Charts
+                function createGaugeChart(canvasId, value, label) {
+                    const ctx = document.getElementById(canvasId).getContext('2d');
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            datasets: [{
+                                data: [value, 100 - value],
+                                backgroundColor: [value > 50 ? '#FF6384' : '#36A2EB', '#e9ecef'],
+                                borderWidth: 0
+                            }]
+                        },
+                        options: {
+                            circumference: 180,
+                            rotation: -90,
+                            cutout: '70%',
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: { enabled: false },
+                                title: { display: true, text: label, position: 'bottom', font: { size: 16 } }
+                            }
+                        }
+                    });
+                }
+
+                createGaugeChart('gaugeChurnScore', chartData.gauges.avg_churn_score, 'Avg Churn Score (%)');
+                createGaugeChart('gaugeProbability', chartData.gauges.avg_probability, 'Avg Probability (%)');
+                createGaugeChart('gaugeChurnPercentage', chartData.gauges.churn_percentage, 'Churn Percentage (%)');
+
+                // Main Visualization Charts
+                new Chart(document.getElementById('churnBarChart').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: chartData.labels,
+                        datasets: [
+                            { label: 'Churn Score (%)', data: chartData.predictions, backgroundColor: 'rgba(75, 192, 192, 0.6)' },
+                            { label: 'Churn Probability (%)', data: chartData.probabilities, backgroundColor: 'rgba(255, 99, 132, 0.6)' }
+                        ]
+                    },
+                    options: { scales: { y: { beginAtZero: true, max: 100 } } }
+                });
+
+                new Chart(document.getElementById('churnPieChart').getContext('2d'), {
+                    type: 'pie',
+                    data: {
+                        labels: ['Likely to Churn', 'Not Likely to Churn'],
+                        datasets: [{ data: chartData.churn_distribution, backgroundColor: ['#FF6384', '#36A2EB'] }]
+                    }
+                });
+
+                new Chart(document.getElementById('riskBarChart').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Low Risk (<25%)', 'Medium Risk (25-75%)', 'High Risk (>75%)'],
+                        datasets: [{ label: 'Customer Count', data: chartData.risk_distribution, backgroundColor: '#FFCE56' }]
+                    }
+                });
+
+                new Chart(document.getElementById('scoreDistChart').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Low (<30)', 'Medium (30-60)', 'High (>60)'],
+                        datasets: [{ label: 'Score Distribution', data: chartData.score_distribution, backgroundColor: '#4BC0C0' }]
+                    }
+                });
+                // Added new Histogram for Probability Distribution
+                new Chart(document.getElementById('probHistogramChart').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['0-10', '10-20', '20-30', '30-40', '40-50', '50-60', '60-70', '70-80', '80-90', '90-100'],
+                        datasets: [{
+                            label: 'Probability Distribution',
+                            data: chartData.prob_histogram,
+                            backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: { beginAtZero: true, title: { display: true, text: 'Number of Customers' } },
+                            x: { title: { display: true, text: 'Churn Probability (%)' } }
+                        }
+                    }
+                });
+
+                // Added new Box Plot for Churn Scores
+                new Chart(document.getElementById('scoreBoxplotChart').getContext('2d'), {
+                    type: 'bar',  // Chart.js doesn't have native boxplot, so we simulate it
+                    data: {
+                        labels: ['Churn Scores'],
+                        datasets: [{
+                            label: 'Churn Scores',
+                            data: [chartData.score_boxplot.median],  // Median as bar height
+                            backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 1,
+                            barThickness: 50,
+                            // Box plot elements via error bars
+                            errorBars: {
+                                'Churn Scores': {
+                                    lower: chartData.score_boxplot.q1,
+                                    upper: chartData.score_boxplot.q3,
+                                    whiskerLower: chartData.score_boxplot.min,
+                                    whiskerUpper: chartData.score_boxplot.max
+                                }
+                            }
+                        }]
+                    },
+                    options: {
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return [
+                                            `Median: ${chartData.score_boxplot.median.toFixed(2)}`,
+                                            `Q1: ${chartData.score_boxplot.q1.toFixed(2)}`,
+                                            `Q3: ${chartData.score_boxplot.q3.toFixed(2)}`,
+                                            `Min: ${chartData.score_boxplot.min.toFixed(2)}`,
+                                            `Max: ${chartData.score_boxplot.max.toFixed(2)}`
+                                        ];
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: { beginAtZero: true, max: 100, title: { display: true, text: 'Churn Score (%)' } }
+                        }
+                    }
+                });
+
+                // Insight Charts
+                new Chart(document.getElementById('insightChurnPie').getContext('2d'), {
+                    type: 'pie',
+                    data: {
+                        labels: ['Churn Risk', 'No Risk'],
+                        datasets: [{ data: [chartData.churn_distribution[0], chartData.churn_distribution[1]], backgroundColor: ['#FF6384', '#36A2EB'] }]
+                    }
+                });
+
+                new Chart(document.getElementById('insightRiskBar').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Low Risk', 'Medium Risk', 'High Risk'],
+                        datasets: [{ label: 'Count', data: chartData.risk_distribution, backgroundColor: '#FFCE56' }]
+                    }
+                });
+
+                new Chart(document.getElementById('insightScoreBar').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Low', 'Medium', 'High'],
+                        datasets: [{ label: 'Count', data: chartData.score_distribution, backgroundColor: '#4BC0C0' }]
+                    }
+                });
+
+                // Recommendation Charts
+                new Chart(document.getElementById('recHighRiskPie').getContext('2d'), {
+                    type: 'pie',
+                    data: {
+                        labels: ['High Risk', 'Others'],
+                        datasets: [{ data: [chartData.risk_counts[0], chartData.risk_counts[1] + chartData.risk_counts[2]], backgroundColor: ['#FF6384', '#999'] }]
+                    }
+                });
+
+                new Chart(document.getElementById('recChurnBar').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['Likely to Churn', 'Not Likely'],
+                        datasets: [{ label: 'Count', data: chartData.churn_distribution, backgroundColor: '#36A2EB' }]
+                    }
+                });
+
+                new Chart(document.getElementById('recLowRiskDoughnut').getContext('2d'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Low Risk', 'Others'],
+                        datasets: [{ data: [chartData.risk_counts[2], chartData.risk_counts[0] + chartData.risk_counts[1]], backgroundColor: ['#4BC0C0', '#999'] }]
+                    }
+                });
+            </script>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
