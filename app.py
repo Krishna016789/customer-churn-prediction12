@@ -31,9 +31,7 @@ def analysis():
 @app.route('/analysis2')
 def analysis2():
     return render_template("churn_reporttest.html")
-@app.route('/api/placeholder/<int:width>/<int:height>', methods=['GET'])
-def placeholder(width, height):
-    return f"Placeholder image of size {width}x{height}"
+
 
 
 @app.route('/prediction', methods=['GET', 'POST'])
