@@ -6,6 +6,7 @@ import random
 import pickle
 import pandas as pd
 import json
+import os
 
 # Load models
 models = pickle.load(open('xgboosts_model.pkl', 'rb'))
@@ -478,5 +479,8 @@ def batch_prediction():
     # For GET requests, just render the page without processing
     return render_template("batch_prediction.html")
 
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.getenv("PORT", 10000))  # Default to 10000 if PORT is not set
+    app.run(host="0.0.0.0", port=port, debug=True)
